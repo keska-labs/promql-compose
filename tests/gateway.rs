@@ -146,6 +146,18 @@ pub fn error_rate_expr(query: &HttpStatsQuery, metric: &GatewayMetric) -> Expr {
     )
 }
 
+/// Canonical error-rate query string used in tests.
+pub const EXAMPLE_ERROR_RATE_QUERY: &str = concat!(
+    "sum by (http_method) (rate(kie_http_gateway_fetch_requests{",
+    "tenant_id=\"00000000-0000-4000-8000-000000000100\", ",
+    "project_id=\"00000000-0000-4000-8000-000000000200\", ",
+    "integration_id=\"int-1\", http_method=\"GET\", result=\"err\"}[5m]))",
+    " / sum by (http_method) (rate(kie_http_gateway_fetch_requests{",
+    "tenant_id=\"00000000-0000-4000-8000-000000000100\", ",
+    "project_id=\"00000000-0000-4000-8000-000000000200\", ",
+    "integration_id=\"int-1\", http_method=\"GET\"}[5m]))"
+);
+
 /// Canonical example query string used in tests.
 pub const EXAMPLE_HTTP_STATS_QUERY: &str = concat!(
     "60 * sum by (http_method) (rate(kie_http_gateway_fetch_requests{",
@@ -226,15 +238,21 @@ fn multiple_metrics_and_group_by_labels() {
 
     let exprs: Vec<Expr> = (&query).into();
     assert_eq!(exprs.len(), 2);
-    assert!(
-        exprs[0]
-            .to_string()
-            .contains("sum by (http_method, status_class)")
+    assert_eq!(
+        exprs[0].to_string(),
+        concat!(
+            "60 * sum by (http_method, status_class) (rate(kie_http_gateway_fetch_requests{",
+            "tenant_id=\"00000000-0000-0000-0000-000000000000\", ",
+            "project_id=\"00000000-0000-0000-0000-000000000000\"}[5m]))"
+        )
     );
-    assert!(
-        exprs[1]
-            .to_string()
-            .contains("kie_http_gateway_error_responses")
+    assert_eq!(
+        exprs[1].to_string(),
+        concat!(
+            "60 * sum by (http_method, status_class) (rate(kie_http_gateway_error_responses{",
+            "tenant_id=\"00000000-0000-0000-0000-000000000000\", ",
+            "project_id=\"00000000-0000-0000-0000-000000000000\"}[5m]))"
+        )
     );
 }
 
@@ -252,7 +270,15 @@ fn filter_with_custom_prom_value_method() {
     };
 
     let exprs: Vec<Expr> = (&query).into();
-    assert!(exprs[0].to_string().contains("http_method=\"POST\""));
+    assert_eq!(
+        exprs[0].to_string(),
+        concat!(
+            "60 * sum by () (rate(kie_http_gateway_fetch_requests{",
+            "tenant_id=\"00000000-0000-0000-0000-000000000000\", ",
+            "project_id=\"00000000-0000-0000-0000-000000000000\", ",
+            "http_method=\"POST\"}[5m]))"
+        )
+    );
 }
 
 #[test]
@@ -270,13 +296,5 @@ fn error_rate_query_renders() {
     };
 
     let expr = error_rate_expr(&query, &GatewayMetric::FetchRequests);
-    let rendered = expr.to_string();
-
-    assert!(rendered.contains(" / "));
-    assert!(rendered.contains("sum by (http_method)"));
-    assert!(rendered.matches("sum by (http_method)").count() == 2);
-    assert!(rendered.contains("result=\"err\""));
-    assert!(rendered.contains("integration_id=\"int-1\""));
-    assert!(rendered.contains("http_method=\"GET\""));
-    assert!(!rendered.contains("?result"));
+    assert_eq!(expr.to_string(), EXAMPLE_ERROR_RATE_QUERY);
 }

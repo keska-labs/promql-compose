@@ -9,7 +9,7 @@
 //! let expr = promql!(60 * sum by (http_method) (
 //!     rate(http_requests_total { method = "GET" }[5m])
 //! ));
-//! assert!(expr.to_string().contains("sum by (http_method)"));
+//! assert_eq!(expr.to_string(), "60 * sum by (http_method) (rate(http_requests_total{method=\"GET\"}[5m]))");
 //! ```
 
 /// Converts a Rust value into the raw (unquoted) content of a PromQL label value.
