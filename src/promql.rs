@@ -61,6 +61,34 @@ impl PromValue for uuid::Uuid {
     }
 }
 
+use crate::ast::{LabelMatcher, MatchOp};
+
+/// Append a required label matcher to `out`.
+pub fn push_matcher<T: PromValue>(
+    out: &mut Vec<LabelMatcher>,
+    name: &str,
+    op: MatchOp,
+    val: &T,
+) {
+    out.push(LabelMatcher {
+        name: name.to_string(),
+        op,
+        value: val.to_prom_value(),
+    });
+}
+
+/// Append a label matcher when `val` is `Some`; no-op when `None`.
+pub fn push_opt_matcher<T: PromValue>(
+    out: &mut Vec<LabelMatcher>,
+    name: &str,
+    op: MatchOp,
+    val: &Option<T>,
+) {
+    if let Some(v) = val {
+        push_matcher(out, name, op, v);
+    }
+}
+
 /// Parse/build a PromQL expression into an [`crate::ast::Expr`].
 #[macro_export]
 macro_rules! promql {
@@ -282,42 +310,86 @@ macro_rules! promql {
     // ---------------------------------------------------------------------
     // @matchers — comma separated `name <op> value` list
     // ---------------------------------------------------------------------
-    (@matchers $sel:ident;) => {};
-    (@matchers $sel:ident; .. ( $e:expr ) $(, $($rest:tt)*)?) => {
-        $sel.matchers.extend($e);
-        $( $crate::promql!(@matchers $sel; $($rest)*); )?
+    (@matchers $sel:ident; $($rest:tt)*) => {
+        $crate::promql!(@matchers_into &mut $sel.matchers; $($rest)*);
     };
-    (@matchers $sel:ident; $name:ident = ~ $val:expr $(, $($rest:tt)*)?) => {
-        $sel.matchers.push($crate::ast::LabelMatcher {
-            name: stringify!($name).to_string(),
-            op: $crate::ast::MatchOp::Re,
-            value: $crate::PromValue::to_prom_value(&$val),
-        });
-        $( $crate::promql!(@matchers $sel; $($rest)*); )?
+
+    (@matchers_into $out:expr;) => {};
+    (@matchers_into $out:expr; .. ( $e:expr ) $(, $($rest:tt)*)?) => {
+        $out.extend($e);
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
     };
-    (@matchers $sel:ident; $name:ident ! ~ $val:expr $(, $($rest:tt)*)?) => {
-        $sel.matchers.push($crate::ast::LabelMatcher {
-            name: stringify!($name).to_string(),
-            op: $crate::ast::MatchOp::Nre,
-            value: $crate::PromValue::to_prom_value(&$val),
-        });
-        $( $crate::promql!(@matchers $sel; $($rest)*); )?
+    (@matchers_into $out:expr; ? $name:ident = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
     };
-    (@matchers $sel:ident; $name:ident != $val:expr $(, $($rest:tt)*)?) => {
-        $sel.matchers.push($crate::ast::LabelMatcher {
-            name: stringify!($name).to_string(),
-            op: $crate::ast::MatchOp::Ne,
-            value: $crate::PromValue::to_prom_value(&$val),
-        });
-        $( $crate::promql!(@matchers $sel; $($rest)*); )?
+    (@matchers_into $out:expr; ? $name:ident ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
     };
-    (@matchers $sel:ident; $name:ident = $val:expr $(, $($rest:tt)*)?) => {
-        $sel.matchers.push($crate::ast::LabelMatcher {
-            name: stringify!($name).to_string(),
-            op: $crate::ast::MatchOp::Eq,
-            value: $crate::PromValue::to_prom_value(&$val),
-        });
-        $( $crate::promql!(@matchers $sel; $($rest)*); )?
+    (@matchers_into $out:expr; ? $name:ident != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $name:ident = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $name:ident ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? $name:ident = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $name:ident != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $name:ident = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            stringify!($name),
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
     };
 
     // ---------------------------------------------------------------------
@@ -325,6 +397,19 @@ macro_rules! promql {
     // ---------------------------------------------------------------------
     ($($tokens:tt)*) => {{
         $crate::promql!(@expr $($tokens)*)
+    }};
+}
+
+/// Build a standalone list of label matchers.
+///
+/// Uses the same matcher syntax as selector braces in [`promql!`], including
+/// optional matchers (`?name = expr`) and splices (`..(vec)`).
+#[macro_export]
+macro_rules! promql_match {
+    ($($tokens:tt)*) => {{
+        let mut __matchers: ::std::vec::Vec<$crate::ast::LabelMatcher> = ::std::vec::Vec::new();
+        $crate::promql!(@matchers_into &mut __matchers; $($tokens)*);
+        __matchers
     }};
 }
 
@@ -524,5 +609,87 @@ mod tests {
                 })),
             }
         );
+    }
+
+    #[test]
+    fn promql_match_required_and_optional() {
+        let integration_id: Option<&str> = Some("int-1");
+        let http_method: Option<&str> = None;
+        let matchers = promql_match!(
+            tenant_id = "t1",
+            ?integration_id = integration_id,
+            ?http_method = http_method,
+        );
+        assert_eq!(matchers.len(), 2);
+        assert_eq!(matchers[0].name, "tenant_id");
+        assert_eq!(matchers[1].name, "integration_id");
+    }
+
+    #[test]
+    fn promql_match_parity_with_selector() {
+        let expr = promql!(m { a = "1", b != "2" });
+        let from_match = promql_match!(a = "1", b != "2");
+        assert_eq!(sel(&expr).matchers, from_match);
+    }
+
+    #[test]
+    fn promql_match_splice() {
+        let extra = vec![LabelMatcher {
+            name: "b".to_string(),
+            op: MatchOp::Eq,
+            value: "2".to_string(),
+        }];
+        let matchers = promql_match!(a = "1", ..(extra));
+        assert_eq!(matchers.len(), 2);
+    }
+
+    #[test]
+    fn promql_selector_optional_matchers() {
+        let integration_id: Option<&str> = Some("int-1");
+        let http_method: Option<&str> = None;
+        let expr = promql!(metric {
+            tenant_id = "t1",
+            ?integration_id = integration_id,
+            ?http_method = http_method,
+        });
+        let sel = sel(&expr);
+        assert_eq!(sel.matchers.len(), 2);
+        assert_eq!(sel.matchers[0].name, "tenant_id");
+        assert_eq!(sel.matchers[1].name, "integration_id");
+    }
+
+    #[test]
+    fn promql_selector_optional_all_operators() {
+        let a: Option<&str> = Some("1");
+        let b: Option<&str> = None;
+        let c: Option<&str> = Some("3");
+        let d: Option<&str> = Some("4");
+        let expr = promql!(m {
+            ?a = a,
+            ?b != b,
+            ?c =~ c,
+            ?d !~ d,
+        });
+        let sel = sel(&expr);
+        assert_eq!(sel.matchers.len(), 3);
+        assert_eq!(
+            sel.matchers.iter().map(|m| m.op.clone()).collect::<Vec<_>>(),
+            vec![MatchOp::Eq, MatchOp::Re, MatchOp::Nre]
+        );
+    }
+
+    #[test]
+    fn promql_selector_splice_with_optional() {
+        let extra = vec![LabelMatcher {
+            name: "b".to_string(),
+            op: MatchOp::Eq,
+            value: "2".to_string(),
+        }];
+        let optional: Option<&str> = Some("x");
+        let expr = promql!(m {
+            ..(extra),
+            ?c = optional,
+        });
+        assert_eq!(sel(&expr).matchers.len(), 2);
     }
 }

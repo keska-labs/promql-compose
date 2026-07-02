@@ -18,38 +18,6 @@ pub struct HttpGatewayStatsFilter {
     pub status_class: Option<String>,
 }
 
-impl HttpGatewayStatsFilter {
-    pub fn matchers(&self) -> Vec<LabelMatcher> {
-        let mut matchers = Vec::new();
-
-        if let Some(integration_id) = &self.integration_id {
-            matchers.push(LabelMatcher {
-                name: "integration_id".to_string(),
-                op: MatchOp::Eq,
-                value: integration_id.to_prom_value(),
-            });
-        }
-
-        if let Some(method) = &self.http_method {
-            matchers.push(LabelMatcher {
-                name: "http_method".to_string(),
-                op: MatchOp::Eq,
-                value: method.to_prom_value(),
-            });
-        }
-
-        if let Some(status_class) = &self.status_class {
-            matchers.push(LabelMatcher {
-                name: "status_class".to_string(),
-                op: MatchOp::Eq,
-                value: status_class.to_prom_value(),
-            });
-        }
-
-        matchers
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpGatewayGroupBy {
     HttpMethod,
@@ -130,7 +98,9 @@ impl From<&HttpStatsQuery> for Vec<Expr> {
                         (metric.func()) ( (metric.metric_name()) {
                             tenant_id = query.tenant_id,
                             project_id = query.project_id,
-                            ..(query.filter.matchers())
+                            ?integration_id = query.filter.integration_id,
+                            ?http_method = query.filter.http_method,
+                            ?status_class = query.filter.status_class,
                         } [(metric.range())] )
                     )
                 )

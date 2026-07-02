@@ -10,6 +10,8 @@ Instead of concatenating query strings by hand, you describe selectors, function
 - **Typed AST** — `Expr`, `Selector`, `LabelMatcher`, and related types in `ast`
 - **Runtime values** — label values come from variables via the `PromValue` trait
 - **Dynamic splices** — inject arbitrary matchers and aggregation labels with `..(expr)`
+- **Optional matchers** — skip label matchers when a value is `None` with `?name = expr`
+- **Standalone matcher lists** — build `Vec<LabelMatcher>` with `promql_match!`
 - **Full expressions** — scalar binops, function calls (`rate(...)`), and aggregations (`sum by (...)`)
 
 ## Quick start
@@ -82,7 +84,9 @@ The macro supports runtime data beyond literals:
 | Syntax | Purpose |
 |--------|---------|
 | `tenant_id = query.tenant_id` | Runtime label value via `PromValue` |
-| `..(filter.matchers())` | Splice a `Vec<LabelMatcher>` into a selector |
+| `?integration_id = query.filter.integration_id` | Optional matcher — omitted when `None` |
+| `..(extra_matchers)` | Splice a `Vec<LabelMatcher>` into a selector |
+| `promql_match!(?a = x, b = y)` | Build a standalone `Vec<LabelMatcher>` |
 | `(metric.metric_name())` | Dynamic metric name |
 | `[(metric.range())]` | Dynamic range duration |
 | `(metric.func()) (...)` | Dynamic function name |
@@ -91,7 +95,7 @@ The macro supports runtime data beyond literals:
 
 ## Integrating with your query types
 
-The integration test in `tests/gateway.rs` shows the intended pattern: define a query struct, implement `PromValue` for your value types, build filter matchers in a helper method, and use `From<&YourQuery> for Vec<Expr>` with the macro:
+The integration test in `tests/gateway.rs` shows the intended pattern: define a query struct, implement `PromValue` for your value types, and use `From<&YourQuery> for Vec<Expr>` with optional matchers inlined in the selector:
 
 ```rust
 promql!(
@@ -99,10 +103,23 @@ promql!(
         (metric.func()) ( (metric.metric_name()) {
             tenant_id = query.tenant_id,
             project_id = query.project_id,
-            ..(query.filter.matchers())
+            ?integration_id = query.filter.integration_id,
+            ?http_method = query.filter.http_method,
+            ?status_class = query.filter.status_class,
         } [(metric.range())] )
     )
 )
+```
+
+When you need a matcher list outside a full expression, use `promql_match!`:
+
+```rust
+use promql_compose::promql_match;
+
+let matchers = promql_match!(
+    ?integration_id = filter.integration_id,
+    ?http_method = filter.http_method,
+);
 ```
 
 This produces queries like:
