@@ -12,7 +12,7 @@ Instead of concatenating query strings by hand, you describe selectors, function
 - **Dynamic splices** — inject arbitrary matchers and aggregation labels with `..(expr)`
 - **Optional matchers** — skip label matchers when a value is `None` with `?name = expr`
 - **Standalone matcher lists** — build `Vec<LabelMatcher>` with `promql_match!`
-- **Full expressions** — scalar binops, function calls (`rate(...)`, `histogram_quantile(q, ...)`), and aggregations (`sum by (...)`)
+- **Full expressions** — scalar binops, vector binops (`/`, `*`, `+`, `-` between aggregations and calls), function calls (`rate(...)`, `histogram_quantile(q, ...)`), and aggregations (`sum by (...)`)
 
 ## Quick start
 
@@ -70,6 +70,36 @@ println!("{}", expr);
 // histogram_quantile(0.99, sum by (le, http_method) (rate(...)))
 ```
 
+Combine vector expressions with `/`, `*`, `+`, or `-` — useful for error rates and ratios:
+
+```rust
+use promql_compose::promql;
+
+let groups = vec!["http_method".to_string()];
+let window = "5m";
+let result: Option<&str> = None;
+
+let expr = promql!(
+    sum by (..(groups.clone())) (
+        rate(requests {
+            tenant_id = "t1",
+            result = "err",
+        } [(window)])
+    )
+    /
+    sum by (..(groups)) (
+        rate(requests {
+            tenant_id = "t1",
+            ?result = result,
+        } [(window)])
+    )
+);
+
+println!("{}", expr);
+// sum by (http_method) (rate(requests{tenant_id="t1", result="err"}[5m]))
+//   / sum by (http_method) (rate(requests{tenant_id="t1"}[5m]))
+```
+
 ## Runtime values with `PromValue`
 
 Implement `PromValue` for your domain types to control how they appear in label matchers:
@@ -109,6 +139,7 @@ The macro supports runtime data beyond literals:
 | `(metric.func()) (...)` | Dynamic function name |
 | `sum by (..(labels)) (...)` | Splice aggregation label list |
 | `(scalar) * ...` | Runtime scalar in a binary expression |
+| `sum (...) / sum (...)` | Vector binary expression between primaries |
 | `histogram_quantile(q, sum by (le) (...))` | Multi-arg function call (scalar first arg + PromQL tail) |
 
 ## Integrating with your query types
@@ -162,7 +193,7 @@ Render any expression with `.to_string()` or `{}` in a format string.
 
 This is a pragmatic builder, not a full PromQL parser:
 
-- Operator precedence is intentionally limited (scalar factor → aggregation → call → selector)
+- Operator precedence is intentionally limited: vector binops chain left-to-right at one level (`a / b * c` → `(a / b) * c`); scalar-leading forms like `60 * sum / sum` still bind the entire tail to the scalar op (`60 * (sum / sum)`)
 - Multi-arg comma syntax splits on the first comma only (scalar + PromQL tail, or all-literal scalars)
 - A bare identifier in a call argument position is treated as a Rust `f64` variable, not a PromQL metric name
 - No `@` timestamp modifier, `bool` modifier, or subquery support yet

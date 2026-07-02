@@ -14,8 +14,11 @@ pub struct HttpStatsQuery {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HttpGatewayStatsFilter {
     pub integration_id: Option<String>,
+    pub upstream_host: Option<String>,
     pub http_method: Option<HttpMethod>,
+    pub http_status: Option<String>,
     pub status_class: Option<String>,
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +110,40 @@ impl From<&HttpStatsQuery> for Vec<Expr> {
             })
             .collect()
     }
+}
+
+pub fn error_rate_expr(query: &HttpStatsQuery, metric: &GatewayMetric) -> Expr {
+    let group_labels: Vec<String> = query
+        .group_by
+        .iter()
+        .map(|group| group.label().to_string())
+        .collect();
+
+    promql!(
+        sum by (..(group_labels.clone())) (
+            (metric.func()) ( (metric.metric_name()) {
+                tenant_id = query.tenant_id,
+                project_id = query.project_id,
+                ?integration_id = query.filter.integration_id,
+                ?upstream_host = query.filter.upstream_host,
+                ?http_method = query.filter.http_method,
+                ?http_status = query.filter.http_status,
+                result = "err",
+            } [(metric.range())] )
+        )
+        /
+        sum by (..(group_labels)) (
+            (metric.func()) ( (metric.metric_name()) {
+                tenant_id = query.tenant_id,
+                project_id = query.project_id,
+                ?integration_id = query.filter.integration_id,
+                ?upstream_host = query.filter.upstream_host,
+                ?http_method = query.filter.http_method,
+                ?http_status = query.filter.http_status,
+                ?result = query.filter.result,
+            } [(metric.range())] )
+        )
+    )
 }
 
 /// Canonical example query string used in tests.
@@ -216,4 +253,30 @@ fn filter_with_custom_prom_value_method() {
 
     let exprs: Vec<Expr> = (&query).into();
     assert!(exprs[0].to_string().contains("http_method=\"POST\""));
+}
+
+#[test]
+fn error_rate_query_renders() {
+    let query = HttpStatsQuery {
+        tenant_id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000100").unwrap(),
+        project_id: uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000200").unwrap(),
+        filter: HttpGatewayStatsFilter {
+            integration_id: Some("int-1".to_string()),
+            http_method: Some(HttpMethod::Get),
+            ..Default::default()
+        },
+        group_by: vec![HttpGatewayGroupBy::HttpMethod],
+        metrics: vec![GatewayMetric::FetchRequests],
+    };
+
+    let expr = error_rate_expr(&query, &GatewayMetric::FetchRequests);
+    let rendered = expr.to_string();
+
+    assert!(rendered.contains(" / "));
+    assert!(rendered.contains("sum by (http_method)"));
+    assert!(rendered.matches("sum by (http_method)").count() == 2);
+    assert!(rendered.contains("result=\"err\""));
+    assert!(rendered.contains("integration_id=\"int-1\""));
+    assert!(rendered.contains("http_method=\"GET\""));
+    assert!(!rendered.contains("?result"));
 }

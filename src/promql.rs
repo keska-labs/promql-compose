@@ -174,133 +174,187 @@ macro_rules! promql {
         }
     }};
 
-    (@expr $op:ident by ( $($labels:tt)* ) ( $($inner:tt)* )) => {{
-        let mut __labels: ::std::vec::Vec<String> = ::std::vec::Vec::new();
-        $crate::promql!(@labels __labels; $($labels)*);
-        $crate::ast::Expr::Aggregation {
-            op: stringify!($op).to_string(),
-            modifier: ::core::option::Option::Some($crate::ast::AggrMod::By(__labels)),
-            arg: ::std::boxed::Box::new($crate::promql!(@expr $($inner)*)),
-        }
-    }};
-    (@expr $op:ident without ( $($labels:tt)* ) ( $($inner:tt)* )) => {{
-        let mut __labels: ::std::vec::Vec<String> = ::std::vec::Vec::new();
-        $crate::promql!(@labels __labels; $($labels)*);
-        $crate::ast::Expr::Aggregation {
-            op: stringify!($op).to_string(),
-            modifier: ::core::option::Option::Some($crate::ast::AggrMod::Without(__labels)),
-            arg: ::std::boxed::Box::new($crate::promql!(@expr $($inner)*)),
-        }
-    }};
-
-    (@expr ( $func:expr ) ( $a:literal , $b:literal $(, $rest:literal)* $(,)? )) => {{
-        $crate::ast::Expr::Call {
-            func: ::std::string::ToString::to_string(&$func),
-            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
-        }
-    }};
-
-    (@expr ( $func:expr ) ( ( $first:expr ) , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: ::std::string::ToString::to_string(&$func),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr ( $func:expr ) ( $first:literal , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: ::std::string::ToString::to_string(&$func),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr ( $func:expr ) ( $first:ident , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: ::std::string::ToString::to_string(&$func),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr ( $func:expr ) ( $($inner:tt)* )) => {{
-        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
-        $crate::promql! { @call_args __args; $($inner)* };
-        $crate::ast::Expr::Call {
-            func: ::std::string::ToString::to_string(&$func),
-            args: __args,
-        }
-    }};
-
-    (@expr $func:ident ( $a:literal , $b:literal $(, $rest:literal)* $(,)? )) => {{
-        $crate::ast::Expr::Call {
-            func: stringify!($func).to_string(),
-            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
-        }
-    }};
-
-    (@expr $func:ident ( ( $first:expr ) , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: stringify!($func).to_string(),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr $func:ident ( $first:literal , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: stringify!($func).to_string(),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr $func:ident ( $first:ident , $($rest:tt)+ )) => {{
-        $crate::ast::Expr::Call {
-            func: stringify!($func).to_string(),
-            args: ::std::vec![
-                $crate::scalar_arg($first),
-                $crate::promql! { @call_arg $($rest)* },
-            ],
-        }
-    }};
-
-    (@expr $func:ident ( $($inner:tt)* )) => {{
-        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
-        $crate::promql! { @call_args __args; $($inner)* };
-        $crate::ast::Expr::Call {
-            func: stringify!($func).to_string(),
-            args: __args,
-        }
-    }};
-
     (@expr ( $($inner:tt)+ )) => {{
         $crate::promql!(@expr $($inner)*)
     }};
 
-    (@expr $lit:literal) => {{
-        $crate::ast::Expr::Scalar($lit as f64)
+    (@expr $($tokens:tt)*) => {{
+        $crate::promql!(@expr_unit $($tokens)*)
     }};
 
-    (@expr $($tokens:tt)+) => {{
-        let mut __sel = $crate::ast::Selector::default();
-        $crate::promql!(@parse __sel; $($tokens)*);
-        $crate::ast::Expr::Selector(__sel)
+    // ---------------------------------------------------------------------
+    // @expr_unit — primary expressions, then optional binop tail
+    // ---------------------------------------------------------------------
+    (@expr_unit $op:ident by ( $($labels:tt)* ) ( $($inner:tt)* ) $($rest:tt)*) => {{
+        let mut __labels: ::std::vec::Vec<String> = ::std::vec::Vec::new();
+        $crate::promql!(@labels __labels; $($labels)*);
+        let __node = $crate::ast::Expr::Aggregation {
+            op: stringify!($op).to_string(),
+            modifier: ::core::option::Option::Some($crate::ast::AggrMod::By(__labels)),
+            arg: ::std::boxed::Box::new($crate::promql!(@expr $($inner)*)),
+        };
+        $crate::promql!(@expr_tail __node; $($rest)*)
+    }};
+    (@expr_unit $op:ident without ( $($labels:tt)* ) ( $($inner:tt)* ) $($rest:tt)*) => {{
+        let mut __labels: ::std::vec::Vec<String> = ::std::vec::Vec::new();
+        $crate::promql!(@labels __labels; $($labels)*);
+        let __node = $crate::ast::Expr::Aggregation {
+            op: stringify!($op).to_string(),
+            modifier: ::core::option::Option::Some($crate::ast::AggrMod::Without(__labels)),
+            arg: ::std::boxed::Box::new($crate::promql!(@expr $($inner)*)),
+        };
+        $crate::promql!(@expr_tail __node; $($rest)*)
     }};
 
-    (@expr) => {{
+    (@expr_unit ( $func:expr ) ( $a:literal , $b:literal $(, $rest:literal)* $(,)? ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit ( $func:expr ) ( ( $first:expr ) , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit ( $func:expr ) ( $first:literal , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit ( $func:expr ) ( $first:ident , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit ( $func:expr ) ( $($inner:tt)* ) $($tail:tt)*) => {{
+        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
+        $crate::promql! { @call_args __args; $($inner)* };
+        let __node = $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: __args,
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $func:ident ( $a:literal , $b:literal $(, $rest:literal)* $(,)? ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $func:ident ( ( $first:expr ) , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $func:ident ( $first:literal , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $func:ident ( $first:ident , $($rest:tt)+ ) $($tail:tt)*) => {{
+        let __node = $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $func:ident ( $($inner:tt)* ) $($tail:tt)*) => {{
+        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
+        $crate::promql! { @call_args __args; $($inner)* };
+        let __node = $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: __args,
+        };
+        $crate::promql!(@expr_tail __node; $($tail)*)
+    }};
+
+    (@expr_unit $lit:literal $($rest:tt)*) => {{
+        let __node = $crate::ast::Expr::Scalar($lit as f64);
+        $crate::promql!(@expr_tail __node; $($rest)*)
+    }};
+
+    (@expr_unit $($tokens:tt)+) => {{
+        $crate::promql!(@expr_unit_split []; $($tokens)*)
+    }};
+
+    (@expr_unit) => {{
         compile_error!("promql!: empty expression")
+    }};
+
+    // ---------------------------------------------------------------------
+    // @expr_unit_split — selector fallback; split at first top-level binop
+    // ---------------------------------------------------------------------
+    (@expr_unit_split [$($acc:tt)*];) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        $crate::promql!(@parse __sel; $($acc)*);
+        $crate::promql!(@expr_tail $crate::ast::Expr::Selector(__sel);)
+    }};
+    (@expr_unit_split [$($acc:tt)*]; * $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        $crate::promql!(@parse __sel; $($acc)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node; * $($rest)*)
+    }};
+    (@expr_unit_split [$($acc:tt)*]; / $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        $crate::promql!(@parse __sel; $($acc)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node; / $($rest)*)
+    }};
+    (@expr_unit_split [$($acc:tt)*]; + $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        $crate::promql!(@parse __sel; $($acc)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node; + $($rest)*)
+    }};
+    (@expr_unit_split [$($acc:tt)*]; - $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        $crate::promql!(@parse __sel; $($acc)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node; - $($rest)*)
+    }};
+    (@expr_unit_split [$($acc:tt)*]; $tok:tt $($rest:tt)*) => {{
+        $crate::promql!(@expr_unit_split [$($acc)* $tok]; $($rest)*)
     }};
 
     (@expr_tail $node:expr;) => { $node };
@@ -879,6 +933,36 @@ mod tests {
             other => panic!("expected call, got {other:?}"),
         };
         assert_eq!(call.len(), 2);
+    }
+
+    #[test]
+    fn vector_binary_division() {
+        let groups = vec!["http_method".to_string()];
+        let window = "5m";
+        let result: Option<&str> = None;
+        let metric = "requests";
+        let expr = promql!(
+            sum by (..(groups.clone())) (
+                rate((metric) {
+                    tenant_id = "t1",
+                    result = "err",
+                } [(window)])
+            )
+            /
+            sum by (..(groups)) (
+                rate((metric) {
+                    tenant_id = "t1",
+                    ?result = result,
+                } [(window)])
+            )
+        );
+        assert_eq!(
+            expr.to_string(),
+            concat!(
+                "sum by (http_method) (rate(requests{tenant_id=\"t1\", result=\"err\"}[5m]))",
+                " / sum by (http_method) (rate(requests{tenant_id=\"t1\"}[5m]))"
+            )
+        );
     }
 
     #[test]
