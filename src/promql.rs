@@ -5,7 +5,7 @@
 //! label matchers are converted through the [`PromValue`] trait.
 //!
 //! ```
-//! # use promql_queen::promql;
+//! # use promql_compose::promql;
 //! let expr = promql!(60 * sum by (http_method) (
 //!     rate(http_requests_total { method = "GET" }[5m])
 //! ));

@@ -1,4 +1,4 @@
-# promql-queen
+# promql-compose
 
 A Rust library for building PromQL queries as a typed AST, using a `macro_rules!` DSL that looks like PromQL but accepts runtime values.
 
@@ -18,14 +18,14 @@ Add the dependency:
 
 ```toml
 [dependencies]
-promql-queen = "0.1"
+promql-compose = "0.1"
 uuid = "1"
 ```
 
 Build a selector:
 
 ```rust
-use promql_queen::promql;
+use promql_compose::promql;
 
 let expr = promql!(http_requests_total {
     environment =~ "staging|testing|development",
@@ -39,7 +39,7 @@ println!("{}", expr);
 Build a full expression:
 
 ```rust
-use promql_queen::promql;
+use promql_compose::promql;
 
 let expr = promql!(
     60 * sum by (http_method) (
@@ -56,7 +56,7 @@ println!("{}", expr);
 Implement `PromValue` for your domain types to control how they appear in label matchers:
 
 ```rust
-use promql_queen::{PromValue, promql};
+use promql_compose::{PromValue, promql};
 
 enum HttpMethod { Get, Post }
 

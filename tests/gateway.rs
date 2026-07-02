@@ -1,6 +1,6 @@
 //! Stub HTTP gateway query types demonstrating `From<HttpStatsQuery>`.
 
-use promql_queen::{AggrMod, Expr, LabelMatcher, MatchOp, PromValue, Selector, promql};
+use promql_compose::{AggrMod, Expr, LabelMatcher, MatchOp, PromValue, Selector, promql};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpStatsQuery {
