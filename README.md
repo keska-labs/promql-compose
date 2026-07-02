@@ -12,7 +12,7 @@ Instead of concatenating query strings by hand, you describe selectors, function
 - **Dynamic splices** — inject arbitrary matchers and aggregation labels with `..(expr)`
 - **Optional matchers** — skip label matchers when a value is `None` with `?name = expr`
 - **Standalone matcher lists** — build `Vec<LabelMatcher>` with `promql_match!`
-- **Full expressions** — scalar binops, function calls (`rate(...)`), and aggregations (`sum by (...)`)
+- **Full expressions** — scalar binops, function calls (`rate(...)`, `histogram_quantile(q, ...)`), and aggregations (`sum by (...)`)
 
 ## Quick start
 
@@ -51,6 +51,23 @@ let expr = promql!(
 
 println!("{}", expr);
 // 60 * sum by (http_method) (rate(http_requests_total{method="GET"}[5m]))
+```
+
+Multi-argument function calls accept a numeric first argument (literal, `f64` variable, or parenthesized Rust expression), then a PromQL expression for the remaining argument(s). Commas inside matchers or label lists in the tail stay part of that argument:
+
+```rust
+use promql_compose::promql;
+
+let quantile = 0.99;
+let expr = promql!(histogram_quantile(
+    quantile,
+    sum by (le, http_method) (
+        rate(http_request_duration_seconds_bucket { job = "api" }[5m])
+    )
+));
+
+println!("{}", expr);
+// histogram_quantile(0.99, sum by (le, http_method) (rate(...)))
 ```
 
 ## Runtime values with `PromValue`
@@ -92,6 +109,7 @@ The macro supports runtime data beyond literals:
 | `(metric.func()) (...)` | Dynamic function name |
 | `sum by (..(labels)) (...)` | Splice aggregation label list |
 | `(scalar) * ...` | Runtime scalar in a binary expression |
+| `histogram_quantile(q, sum by (le) (...))` | Multi-arg function call (scalar first arg + PromQL tail) |
 
 ## Integrating with your query types
 
@@ -145,6 +163,8 @@ Render any expression with `.to_string()` or `{}` in a format string.
 This is a pragmatic builder, not a full PromQL parser:
 
 - Operator precedence is intentionally limited (scalar factor → aggregation → call → selector)
+- Multi-arg comma syntax splits on the first comma only (scalar + PromQL tail, or all-literal scalars)
+- A bare identifier in a call argument position is treated as a Rust `f64` variable, not a PromQL metric name
 - No `@` timestamp modifier, `bool` modifier, or subquery support yet
 
 ## Development

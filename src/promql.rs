@@ -61,15 +61,15 @@ impl PromValue for uuid::Uuid {
     }
 }
 
-use crate::ast::{LabelMatcher, MatchOp};
+use crate::ast::{Expr, LabelMatcher, MatchOp};
+
+/// Build a scalar [`Expr`] from a numeric Rust value (e.g. a call argument).
+pub fn scalar_arg(v: impl Into<f64>) -> Expr {
+    Expr::Scalar(v.into())
+}
 
 /// Append a required label matcher to `out`.
-pub fn push_matcher<T: PromValue>(
-    out: &mut Vec<LabelMatcher>,
-    name: &str,
-    op: MatchOp,
-    val: &T,
-) {
+pub fn push_matcher<T: PromValue>(out: &mut Vec<LabelMatcher>, name: &str, op: MatchOp, val: &T) {
     out.push(LabelMatcher {
         name: name.to_string(),
         op,
@@ -193,22 +193,104 @@ macro_rules! promql {
         }
     }};
 
-    (@expr ( $func:expr ) ( $($inner:tt)* )) => {{
+    (@expr ( $func:expr ) ( $a:literal , $b:literal $(, $rest:literal)* $(,)? )) => {{
         $crate::ast::Expr::Call {
             func: ::std::string::ToString::to_string(&$func),
-            args: ::std::vec![$crate::promql!(@expr $($inner)*)],
+            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
+        }
+    }};
+
+    (@expr ( $func:expr ) ( ( $first:expr ) , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        }
+    }};
+
+    (@expr ( $func:expr ) ( $first:literal , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        }
+    }};
+
+    (@expr ( $func:expr ) ( $first:ident , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        }
+    }};
+
+    (@expr ( $func:expr ) ( $($inner:tt)* )) => {{
+        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
+        $crate::promql! { @call_args __args; $($inner)* };
+        $crate::ast::Expr::Call {
+            func: ::std::string::ToString::to_string(&$func),
+            args: __args,
+        }
+    }};
+
+    (@expr $func:ident ( $a:literal , $b:literal $(, $rest:literal)* $(,)? )) => {{
+        $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![$crate::scalar_arg($a), $crate::scalar_arg($b), $($crate::scalar_arg($rest),)*],
+        }
+    }};
+
+    (@expr $func:ident ( ( $first:expr ) , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        }
+    }};
+
+    (@expr $func:ident ( $first:literal , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
+        }
+    }};
+
+    (@expr $func:ident ( $first:ident , $($rest:tt)+ )) => {{
+        $crate::ast::Expr::Call {
+            func: stringify!($func).to_string(),
+            args: ::std::vec![
+                $crate::scalar_arg($first),
+                $crate::promql! { @call_arg $($rest)* },
+            ],
         }
     }};
 
     (@expr $func:ident ( $($inner:tt)* )) => {{
+        let mut __args: ::std::vec::Vec<$crate::ast::Expr> = ::std::vec::Vec::new();
+        $crate::promql! { @call_args __args; $($inner)* };
         $crate::ast::Expr::Call {
             func: stringify!($func).to_string(),
-            args: ::std::vec![$crate::promql!(@expr $($inner)*)],
+            args: __args,
         }
     }};
 
     (@expr ( $($inner:tt)+ )) => {{
         $crate::promql!(@expr $($inner)*)
+    }};
+
+    (@expr $lit:literal) => {{
+        $crate::ast::Expr::Scalar($lit as f64)
     }};
 
     (@expr $($tokens:tt)+) => {{
@@ -250,6 +332,27 @@ macro_rules! promql {
             rhs: ::std::boxed::Box::new($crate::promql!(@expr $($rest)*)),
         }
     }};
+
+    // ---------------------------------------------------------------------
+    // @call_args / @call_arg — function argument parsing
+    // ---------------------------------------------------------------------
+    (@call_args $out:ident;) => {};
+    (@call_args $out:ident; $($arg:tt)*) => {
+        $out.push($crate::promql! { @call_arg $($arg)* });
+    };
+
+    (@call_arg $lit:literal) => {
+        $crate::scalar_arg($lit)
+    };
+    (@call_arg $id:ident) => {
+        $crate::scalar_arg($id)
+    };
+    (@call_arg ( $e:expr )) => {
+        $crate::scalar_arg($e)
+    };
+    (@call_arg $($tt:tt)+) => {
+        $crate::promql! { @expr $($tt)* }
+    };
 
     // ---------------------------------------------------------------------
     // @labels — aggregation label lists, with optional splice
@@ -673,7 +776,10 @@ mod tests {
         let sel = sel(&expr);
         assert_eq!(sel.matchers.len(), 3);
         assert_eq!(
-            sel.matchers.iter().map(|m| m.op.clone()).collect::<Vec<_>>(),
+            sel.matchers
+                .iter()
+                .map(|m| m.op.clone())
+                .collect::<Vec<_>>(),
             vec![MatchOp::Eq, MatchOp::Re, MatchOp::Nre]
         );
     }
@@ -691,5 +797,108 @@ mod tests {
             ?c = optional,
         });
         assert_eq!(sel(&expr).matchers.len(), 2);
+    }
+
+    #[test]
+    fn multi_arg_histogram_quantile() {
+        let expr = promql!(histogram_quantile(
+            0.99,
+            sum by (le, http_method) (
+                rate(http_request_duration_seconds_bucket { job = "api" }[5m])
+            )
+        ));
+        let call = match &expr {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "histogram_quantile");
+                args
+            }
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 2);
+        assert_eq!(call[0], Expr::Scalar(0.99));
+        assert_eq!(
+            expr.to_string(),
+            "histogram_quantile(0.99, sum by (le, http_method) (rate(http_request_duration_seconds_bucket{job=\"api\"}[5m])))"
+        );
+    }
+
+    #[test]
+    fn multi_arg_runtime_quantile_variable() {
+        let quantile = 0.95;
+        let expr = promql!(histogram_quantile(
+            quantile,
+            sum by (le) (rate(buckets[5m]))
+        ));
+        let call = match &expr {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "histogram_quantile");
+                args
+            }
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 2);
+        assert_eq!(call[0], Expr::Scalar(0.95));
+    }
+
+    #[test]
+    fn multi_arg_nested_commas_stay_in_one_arg() {
+        let expr = promql!(histogram_quantile(
+            0.99,
+            rate(http_requests { environment = "staging", method = "GET" }[5m])
+        ));
+        let call = match &expr {
+            Expr::Call { args, .. } => args,
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 2);
+        assert!(matches!(&call[1], Expr::Call { func, .. } if func == "rate"));
+    }
+
+    #[test]
+    fn multi_arg_single_arg_regression() {
+        let expr = promql!(rate(http_requests_total { method = "GET" }[5m]));
+        let call = match &expr {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "rate");
+                args
+            }
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 1);
+    }
+
+    #[test]
+    fn multi_arg_dynamic_func() {
+        let func = "histogram_quantile";
+        let expr = promql!((func)(0.99, sum by (le) (rate(buckets[5m]))));
+        let call = match &expr {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "histogram_quantile");
+                args
+            }
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 2);
+    }
+
+    #[test]
+    fn multi_arg_three_literal_scalars() {
+        let expr = promql!(clamp_min(0.5, 0.0, 1.0));
+        let call = match &expr {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "clamp_min");
+                args
+            }
+            other => panic!("expected call, got {other:?}"),
+        };
+        assert_eq!(call.len(), 3);
+        assert_eq!(
+            call,
+            &[
+                Expr::Scalar(0.5),
+                Expr::Scalar(0.0),
+                Expr::Scalar(1.0),
+            ]
+        );
     }
 }
