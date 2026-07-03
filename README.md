@@ -131,6 +131,7 @@ The macro supports runtime data beyond literals:
 | Syntax | Purpose |
 |--------|---------|
 | `tenant_id = query.tenant_id` | Runtime label value via `PromValue` |
+| `(label_key) = value` | Runtime label name via `ToString` |
 | `?integration_id = query.filter.integration_id` | Optional matcher — omitted when `None` |
 | `..(extra_matchers)` | Splice a `Vec<LabelMatcher>` into a selector |
 | `promql_match!(?a = x, b = y)` | Build a standalone `Vec<LabelMatcher>` |
@@ -140,6 +141,7 @@ The macro supports runtime data beyond literals:
 | `[(metric.range())]` | Dynamic range duration |
 | `(metric.func()) (...)` | Dynamic function name |
 | `sum by (..(labels)) (...)` | Splice aggregation label list |
+| `sum by ((label_key), tenant_id) (...)` | Runtime aggregation label name via `ToString` |
 | `(scalar) * ...` | Runtime scalar in a binary expression |
 | `sum (...) / sum (...)` | Vector binary expression between primaries |
 | `histogram_quantile(q, sum by (le) (...))` | Multi-arg function call (scalar first arg + PromQL tail) |
@@ -208,6 +210,13 @@ let expr = promql!("http.server.duration_seconds" {
 // Dynamic metric name (existing pattern)
 let name = "http.server.duration_seconds";
 let expr = promql!((name) { tenant_id = "t1" }[5m]);
+
+// Dynamic label name
+let attr = "service.name";
+let expr = promql!("http.server.duration_seconds" {
+    (attr) = "frontend",
+    tenant_id = "t1",
+}[5m]);
 
 // Explicit __name__ matcher
 let expr = promql!({ __name__ = name, tenant_id = "t1" }[5m]);

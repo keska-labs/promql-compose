@@ -69,9 +69,14 @@ pub fn scalar_arg(v: impl Into<f64>) -> Expr {
 }
 
 /// Append a required label matcher to `out`.
-pub fn push_matcher<T: PromValue>(out: &mut Vec<LabelMatcher>, name: &str, op: MatchOp, val: &T) {
+pub fn push_matcher<T: PromValue>(
+    out: &mut Vec<LabelMatcher>,
+    name: impl Into<String>,
+    op: MatchOp,
+    val: &T,
+) {
     out.push(LabelMatcher {
-        name: name.to_string(),
+        name: name.into(),
         op,
         value: val.to_prom_value(),
     });
@@ -80,7 +85,7 @@ pub fn push_matcher<T: PromValue>(out: &mut Vec<LabelMatcher>, name: &str, op: M
 /// Append a label matcher when `val` is `Some`; no-op when `None`.
 pub fn push_opt_matcher<T: PromValue>(
     out: &mut Vec<LabelMatcher>,
-    name: &str,
+    name: impl Into<String>,
     op: MatchOp,
     val: &Option<T>,
 ) {
@@ -445,6 +450,14 @@ macro_rules! promql {
         $out.push(stringify!($label).to_string());
         $( $crate::promql!(@labels $out; $($rest)*); )?
     };
+    (@labels $out:ident; $label:literal $(, $($rest:tt)*)?) => {
+        $out.push($label.to_string());
+        $( $crate::promql!(@labels $out; $($rest)*); )?
+    };
+    (@labels $out:ident; ( $label:expr ) $(, $($rest:tt)*)?) => {
+        $out.push(::std::string::ToString::to_string(&$label));
+        $( $crate::promql!(@labels $out; $($rest)*); )?
+    };
 
     // ---------------------------------------------------------------------
     // @parse — metric name, brace block and following modifiers
@@ -649,6 +662,78 @@ macro_rules! promql {
         $crate::push_matcher(
             $out,
             stringify!($name),
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? ( $name:expr ) = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? ( $name:expr ) ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? ( $name:expr ) != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ( $name:expr ) = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ( $name:expr ) ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? ( $name:expr ) = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ( $name:expr ) != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ( $name:expr ) = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            ::std::string::ToString::to_string(&$name),
             $crate::ast::MatchOp::Eq,
             &$val,
         );
@@ -1243,5 +1328,99 @@ mod tests {
         }
         .with_metric_name_syntax(MetricNameSyntax::NameLabel);
         assert_eq!(sel.to_string(), "{__name__=\"up\"}");
+    }
+
+    #[test]
+    fn matcher_expr_label_name() {
+        let attr = "service.name";
+        let expr = promql!(m { (attr) = "frontend", tenant_id = "t1" });
+        assert_eq!(
+            expr.to_string(),
+            "m{\"service.name\"=\"frontend\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn matcher_expr_label_name_all_ops() {
+        let key = "label";
+        let expr = promql!(m {
+            (key) = "a",
+            (key) != "b",
+            (key) = ~ "c.*",
+            (key) ! ~ "d.*",
+        });
+        assert_eq!(
+            expr.to_string(),
+            "m{label=\"a\", label!=\"b\", label=~\"c.*\", label!~\"d.*\"}"
+        );
+    }
+
+    #[test]
+    fn matcher_expr_label_name_optional() {
+        let attr = "service.name";
+        let present: Option<&str> = Some("frontend");
+        let absent: Option<&str> = None;
+        let with = promql!(m { ?(attr) = present, tenant_id = "t1" });
+        let without = promql!(m { ?(attr) = absent, tenant_id = "t1" });
+        assert_eq!(
+            with.to_string(),
+            "m{\"service.name\"=\"frontend\", tenant_id=\"t1\"}"
+        );
+        assert_eq!(without.to_string(), "m{tenant_id=\"t1\"}");
+    }
+
+    #[test]
+    fn promql_match_expr_label_name() {
+        let attr = "deployment.environment";
+        let env = "production";
+        let matchers = promql_match!((attr) = env);
+        assert_eq!(matchers.len(), 1);
+        assert_eq!(matchers[0].name, "deployment.environment");
+        assert_eq!(matchers[0].value, "production");
+    }
+
+    #[test]
+    fn matcher_expr_with_literal_and_ident() {
+        let attr = "service.name";
+        let expr = promql!(m {
+            (attr) = "frontend",
+            "deployment.environment" = "prod",
+            tenant_id = "t1",
+        });
+        assert_eq!(
+            expr.to_string(),
+            "m{\"service.name\"=\"frontend\", \"deployment.environment\"=\"prod\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn matcher_expr_label_quoted_brace_syntax() {
+        let attr = "service.name";
+        let expr = promql!(m { (attr) = "frontend", tenant_id = "t1" });
+        let mut sel = sel(&expr).clone();
+        sel.metric_name_syntax = MetricNameSyntax::QuotedBrace;
+        assert_eq!(
+            sel.to_string(),
+            "{\"m\", \"service.name\"=\"frontend\", \"tenant_id\"=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn aggregation_expr_label_name() {
+        let group_key = "deployment.environment";
+        let expr = promql!(sum by ((group_key), tenant_id) (up));
+        assert_eq!(
+            expr.to_string(),
+            "sum by (deployment.environment, tenant_id) (up)"
+        );
+    }
+
+    #[test]
+    fn aggregation_literal_label_name() {
+        let expr = promql!(sum by ("service.name", tenant_id) (up));
+        assert_eq!(
+            expr.to_string(),
+            "sum by (service.name, tenant_id) (up)"
+        );
     }
 }
