@@ -308,6 +308,31 @@ macro_rules! promql {
         $crate::promql!(@expr_tail __node; $($tail)*)
     }};
 
+    (@expr_unit $metric:literal { $($m:tt)* } $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        __sel.metric = ::core::option::Option::Some($metric.to_string());
+        $crate::promql!(@matchers __sel; $($m)*);
+        $crate::promql!(@mods __sel; $($rest)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node;)
+    }};
+    (@expr_unit $metric:literal [ ( $d:expr ) ] $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        __sel.metric = ::core::option::Option::Some($metric.to_string());
+        __sel.range = ::core::option::Option::Some(::std::string::ToString::to_string(&$d));
+        $crate::promql!(@mods __sel; $($rest)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node;)
+    }};
+    (@expr_unit $metric:literal [ $d:tt ] $($rest:tt)*) => {{
+        let mut __sel = $crate::ast::Selector::default();
+        __sel.metric = ::core::option::Option::Some($metric.to_string());
+        __sel.range = ::core::option::Option::Some(stringify!($d).to_string());
+        $crate::promql!(@mods __sel; $($rest)*);
+        let __node = $crate::ast::Expr::Selector(__sel);
+        $crate::promql!(@expr_tail __node;)
+    }};
+
     (@expr_unit $lit:literal $($rest:tt)*) => {{
         let __node = $crate::ast::Expr::Scalar($lit as f64);
         $crate::promql!(@expr_tail __node; $($rest)*)
@@ -424,6 +449,11 @@ macro_rules! promql {
     // ---------------------------------------------------------------------
     // @parse — metric name, brace block and following modifiers
     // ---------------------------------------------------------------------
+    (@parse $sel:ident; $metric:literal { $($m:tt)* } $($rest:tt)*) => {
+        $sel.metric = ::core::option::Option::Some($metric.to_string());
+        $crate::promql!(@matchers $sel; $($m)*);
+        $crate::promql!(@mods $sel; $($rest)*);
+    };
     (@parse $sel:ident; ( $metric:expr ) { $($m:tt)* } $($rest:tt)*) => {
         $sel.metric = ::core::option::Option::Some(::std::string::ToString::to_string(&$metric));
         $crate::promql!(@matchers $sel; $($m)*);
@@ -440,6 +470,10 @@ macro_rules! promql {
     };
     (@parse $sel:ident; ( $metric:expr ) $($rest:tt)*) => {
         $sel.metric = ::core::option::Option::Some(::std::string::ToString::to_string(&$metric));
+        $crate::promql!(@mods $sel; $($rest)*);
+    };
+    (@parse $sel:ident; $metric:literal $($rest:tt)*) => {
+        $sel.metric = ::core::option::Option::Some($metric.to_string());
         $crate::promql!(@mods $sel; $($rest)*);
     };
     (@parse $sel:ident; $name:ident $($rest:tt)*) => {
@@ -474,6 +508,78 @@ macro_rules! promql {
     (@matchers_into $out:expr;) => {};
     (@matchers_into $out:expr; .. ( $e:expr ) $(, $($rest:tt)*)?) => {
         $out.extend($e);
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? $label:literal = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? $label:literal ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? $label:literal != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $label:literal = ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Re,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $label:literal ! ~ $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Nre,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; ? $label:literal = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_opt_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $label:literal != $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Ne,
+            &$val,
+        );
+        $( $crate::promql!(@matchers_into $out; $($rest)*); )?
+    };
+    (@matchers_into $out:expr; $label:literal = $val:expr $(, $($rest:tt)*)?) => {
+        $crate::push_matcher(
+            $out,
+            $label,
+            $crate::ast::MatchOp::Eq,
+            &$val,
+        );
         $( $crate::promql!(@matchers_into $out; $($rest)*); )?
     };
     (@matchers_into $out:expr; ? $name:ident = ~ $val:expr $(, $($rest:tt)*)?) => {
@@ -611,13 +717,14 @@ mod tests {
                         ],
                         range: Some("5m".to_string()),
                         offset: None,
+                        ..Default::default()
                     })],
                 }),
             }),
         }
     }
 
-    use crate::ast::{AggrMod, Expr, LabelMatcher, MatchOp, Selector};
+    use crate::ast::{AggrMod, Expr, LabelMatcher, MatchOp, MetricNameSyntax, Selector};
 
     use super::PromValue;
 
@@ -984,5 +1091,157 @@ mod tests {
                 Expr::Scalar(1.0),
             ]
         );
+    }
+
+    #[test]
+    fn dotted_metric_name_via_expr_normal_syntax() {
+        let name = "http.server.duration_seconds";
+        let expr = promql!((name) { tenant_id = "t1" }[5m]);
+        assert_eq!(
+            expr.to_string(),
+            "{__name__=\"http.server.duration_seconds\", tenant_id=\"t1\"}[5m]"
+        );
+    }
+
+    #[test]
+    fn dotted_metric_name_via_literal_normal_syntax() {
+        let expr = promql!("http.server.duration_seconds" { tenant_id = "t1" }[5m]);
+        let s = sel(&expr);
+        assert_eq!(s.metric.as_deref(), Some("http.server.duration_seconds"));
+        assert_eq!(
+            expr.to_string(),
+            "{__name__=\"http.server.duration_seconds\", tenant_id=\"t1\"}[5m]"
+        );
+    }
+
+    #[test]
+    fn dotted_metric_name_literal_inside_call() {
+        let expr = promql!(rate("http.server.duration_seconds" { tenant_id = "t1" }[5m]));
+        assert_eq!(
+            expr.to_string(),
+            "rate({__name__=\"http.server.duration_seconds\", tenant_id=\"t1\"}[5m])"
+        );
+    }
+
+    #[test]
+    fn name_label_syntax_bare_metric() {
+        let expr = promql!(up);
+        let mut sel = sel(&expr).clone();
+        sel.metric_name_syntax = MetricNameSyntax::NameLabel;
+        assert_eq!(sel.to_string(), "{__name__=\"up\"}");
+    }
+
+    #[test]
+    fn quoted_brace_syntax_bare_metric_with_matchers() {
+        let expr = promql!(http_requests_total { method = "GET" });
+        let mut sel = sel(&expr).clone();
+        sel.metric_name_syntax = MetricNameSyntax::QuotedBrace;
+        assert_eq!(
+            sel.to_string(),
+            "{\"http_requests_total\", \"method\"=\"GET\"}"
+        );
+    }
+
+    #[test]
+    fn quoted_brace_syntax_dotted_metric() {
+        let expr = promql!("http.server.duration_seconds" { tenant_id = "t1" }[5m]);
+        let mut sel = sel(&expr).clone();
+        sel.metric_name_syntax = MetricNameSyntax::QuotedBrace;
+        assert_eq!(
+            sel.to_string(),
+            "{\"http.server.duration_seconds\", \"tenant_id\"=\"t1\"}[5m]"
+        );
+    }
+
+    #[test]
+    fn name_matcher_via_macro_normal_syntax() {
+        let name = "http.server.duration_seconds";
+        let expr = promql!({ __name__ = name, tenant_id = "t1" });
+        assert_eq!(
+            expr.to_string(),
+            "{__name__=\"http.server.duration_seconds\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn dedup_metric_field_and_name_matcher() {
+        let sel = Selector {
+            metric: Some("foo.bar".to_string()),
+            matchers: vec![
+                LabelMatcher {
+                    name: "__name__".to_string(),
+                    op: MatchOp::Eq,
+                    value: "ignored".to_string(),
+                },
+                LabelMatcher {
+                    name: "tenant_id".to_string(),
+                    op: MatchOp::Eq,
+                    value: "t1".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            sel.to_string(),
+            "{__name__=\"foo.bar\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn promql_string_escaping_in_values() {
+        let expr = promql!(m { msg = "say \"hi\"" });
+        assert_eq!(expr.to_string(), "m{msg=\"say \\\"hi\\\"\"}");
+    }
+
+    #[test]
+    fn label_literal_name_normal_syntax() {
+        let expr = promql!(m { "service.name" = "frontend", tenant_id = "t1" });
+        assert_eq!(
+            expr.to_string(),
+            "m{\"service.name\"=\"frontend\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn label_literal_name_quoted_brace_syntax() {
+        let expr = promql!(m { "service.name" = "frontend", tenant_id = "t1" });
+        let mut sel = sel(&expr).clone();
+        sel.metric_name_syntax = MetricNameSyntax::QuotedBrace;
+        assert_eq!(
+            sel.to_string(),
+            "{\"m\", \"service.name\"=\"frontend\", \"tenant_id\"=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn promql_match_label_literal() {
+        let env = "production";
+        let matchers = promql_match!("deployment.environment" = env);
+        assert_eq!(matchers.len(), 1);
+        assert_eq!(matchers[0].name, "deployment.environment");
+        assert_eq!(matchers[0].value, "production");
+    }
+
+    #[test]
+    fn combined_otel_selector_normal_syntax() {
+        let service_name = "frontend";
+        let expr = promql!("http.server.duration_seconds" {
+            "service.name" = service_name,
+            tenant_id = "t1",
+        });
+        assert_eq!(
+            expr.to_string(),
+            "{__name__=\"http.server.duration_seconds\", \"service.name\"=\"frontend\", tenant_id=\"t1\"}"
+        );
+    }
+
+    #[test]
+    fn with_metric_name_syntax_builder() {
+        let sel = Selector {
+            metric: Some("up".to_string()),
+            ..Default::default()
+        }
+        .with_metric_name_syntax(MetricNameSyntax::NameLabel);
+        assert_eq!(sel.to_string(), "{__name__=\"up\"}");
     }
 }

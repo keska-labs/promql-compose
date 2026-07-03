@@ -135,6 +135,8 @@ The macro supports runtime data beyond literals:
 | `..(extra_matchers)` | Splice a `Vec<LabelMatcher>` into a selector |
 | `promql_match!(?a = x, b = y)` | Build a standalone `Vec<LabelMatcher>` |
 | `(metric.metric_name())` | Dynamic metric name |
+| `"http.server.duration_seconds" { ... }` | OTel/UTF-8 metric name (string literal) |
+| `"service.name" = service_name` | OTel/UTF-8 label name (string literal) |
 | `[(metric.range())]` | Dynamic range duration |
 | `(metric.func()) (...)` | Dynamic function name |
 | `sum by (..(labels)) (...)` | Splice aggregation label list |
@@ -182,12 +184,47 @@ This produces queries like:
 | Type | Description |
 |------|-------------|
 | `Expr` | Top-level expression node (scalar, selector, call, aggregation, binary) |
-| `Selector` | Vector selector with metric, matchers, range, and offset |
+| `Selector` | Vector selector with metric, matchers, range, offset, and syntax mode |
+| `MetricNameSyntax` | `Normal`, `NameLabel`, or `QuotedBrace` — controls metric and label serialization |
 | `LabelMatcher` | A single `name op "value"` matcher |
 | `MatchOp` | `=`, `!=`, `=~`, `!~` |
 | `AggrMod` | `by (...)` or `without (...)` aggregation modifier |
 
 Render any expression with `.to_string()` or `{}` in a format string.
+
+### UTF-8 metric and label names
+
+OpenTelemetry metric names (e.g. `http.server.duration_seconds`) and label names (e.g. `service.name`) contain dots and cannot appear as bare PromQL tokens. Build them with string literals, dynamic expressions, or an explicit `__name__` matcher:
+
+```rust
+use promql_compose::{MetricNameSyntax, promql};
+
+// String literal metric and label names
+let expr = promql!("http.server.duration_seconds" {
+    "service.name" = "frontend",
+    tenant_id = "t1",
+}[5m]);
+
+// Dynamic metric name (existing pattern)
+let name = "http.server.duration_seconds";
+let expr = promql!((name) { tenant_id = "t1" }[5m]);
+
+// Explicit __name__ matcher
+let expr = promql!({ __name__ = name, tenant_id = "t1" }[5m]);
+```
+
+Under default `MetricNameSyntax::Normal`, legacy snake_case names render unchanged; non-legacy names serialize as `{__name__="..."}` with quoted label names only when needed. Set `Selector.metric_name_syntax` to pick the output form:
+
+| Mode | Metric example | Label example |
+|------|----------------|---------------|
+| `Normal` (default) | `http_requests_total{...}` or `{__name__="http.server.duration_seconds", ...}` | `tenant_id="t1"` or `"service.name"="frontend"` |
+| `NameLabel` | `{__name__="http_requests_total", ...}` | same label quoting as Normal |
+| `QuotedBrace` | `{"http.server.duration_seconds", ...}` | `"tenant_id"="t1"`, `"service.name"="frontend"` |
+
+```rust
+let mut sel = /* selector from AST or macro */;
+sel.metric_name_syntax = MetricNameSyntax::QuotedBrace;
+```
 
 ## Limitations
 

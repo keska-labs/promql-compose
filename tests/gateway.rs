@@ -197,6 +197,7 @@ pub fn example_http_stats_expr() -> Expr {
                     ],
                     range: Some("5m".to_string()),
                     offset: None,
+                    ..Default::default()
                 })],
             }),
         }),
